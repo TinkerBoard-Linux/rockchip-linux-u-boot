@@ -1120,9 +1120,11 @@ struct vop2_win_data {
 	u8 hsd_pre_filter_mode;
 	u8 vsd_pre_filter_mode;
 	u8 scale_engine_num;
+	u8 source_win_id;
 	u32 reg_offset;
 	u32 max_upscale_factor;
 	u32 max_downscale_factor;
+	u32 feature;
 	bool splice_mode_right;
 };
 
@@ -1413,38 +1415,6 @@ static inline u32 vop2_grf_readl(struct vop2 *vop, void *grf_base, u32 offset,
 	return (readl(grf_base + offset) >> shift) & mask;
 }
 
-static char* get_output_if_name(u32 output_if, char *name)
-{
-	if (output_if & VOP_OUTPUT_IF_RGB)
-		strcat(name, " RGB");
-	if (output_if & VOP_OUTPUT_IF_BT1120)
-		strcat(name, " BT1120");
-	if (output_if & VOP_OUTPUT_IF_BT656)
-		strcat(name, " BT656");
-	if (output_if & VOP_OUTPUT_IF_LVDS0)
-		strcat(name, " LVDS0");
-	if (output_if & VOP_OUTPUT_IF_LVDS1)
-		strcat(name, " LVDS1");
-	if (output_if & VOP_OUTPUT_IF_MIPI0)
-		strcat(name, " MIPI0");
-	if (output_if & VOP_OUTPUT_IF_MIPI1)
-		strcat(name, " MIPI1");
-	if (output_if & VOP_OUTPUT_IF_eDP0)
-		strcat(name, " eDP0");
-	if (output_if & VOP_OUTPUT_IF_eDP1)
-		strcat(name, " eDP1");
-	if (output_if & VOP_OUTPUT_IF_DP0)
-		strcat(name, " DP0");
-	if (output_if & VOP_OUTPUT_IF_DP1)
-		strcat(name, " DP1");
-	if (output_if & VOP_OUTPUT_IF_HDMI0)
-		strcat(name, " HDMI0");
-	if (output_if & VOP_OUTPUT_IF_HDMI1)
-		strcat(name, " HDMI1");
-
-	return name;
-}
-
 static char *get_plane_name(int plane_id, char *name)
 {
 	switch (plane_id) {
@@ -1575,8 +1545,8 @@ static bool is_rb_swap(u32 bus_format, u32 output_mode)
 	 * The default component order of serial rgb3x8 formats
 	 * is BGR. So it is needed to enable RB swap.
 	 */
-	if (bus_format == MEDIA_BUS_FMT_SRGB888_3X8 ||
-	    bus_format == MEDIA_BUS_FMT_SRGB888_DUMMY_4X8)
+	if (bus_format == MEDIA_BUS_FMT_RGB888_3X8 ||
+	    bus_format == MEDIA_BUS_FMT_RGB888_DUMMY_4X8)
 		return true;
 	else
 		return false;
@@ -3634,16 +3604,59 @@ static int rockchip_vop2_send_mcu_cmd(struct display_state *state, u32 type, u32
 	return 0;
 }
 
-static int vop2_get_vrefresh(struct display_state *state)
+static void vop2_dither_setup(struct vop2 *vop2, int bus_format, int crtc_id)
 {
-	struct crtc_state *cstate = &state->crtc_state;
-	struct connector_state *conn_state = &state->conn_state;
-	struct drm_display_mode *mode = &conn_state->mode;
+	u32 vp_offset = crtc_id * 0x100;
+	u8 dither_down_mode = 0;
+	bool dither_down_en = false;
+	bool pre_dither_down_en = false;
 
-	if (cstate->mcu_timing.mcu_pix_total)
-		return mode->vrefresh / cstate->mcu_timing.mcu_pix_total;
-	else
-		return mode->vrefresh;
+	switch (bus_format) {
+	case MEDIA_BUS_FMT_RGB565_1X16:
+		dither_down_en = true;
+		dither_down_mode = RGB888_TO_RGB565;
+		pre_dither_down_en = true;
+		break;
+	case MEDIA_BUS_FMT_RGB666_1X18:
+	case MEDIA_BUS_FMT_RGB666_1X24_CPADHI:
+	case MEDIA_BUS_FMT_RGB666_1X7X3_SPWG:
+		dither_down_en = true;
+		dither_down_mode = RGB888_TO_RGB666;
+		pre_dither_down_en = true;
+		break;
+	case MEDIA_BUS_FMT_YUYV8_1X16:
+	case MEDIA_BUS_FMT_YUV8_1X24:
+	case MEDIA_BUS_FMT_UYYVYY8_0_5X24:
+		dither_down_en = false;
+		pre_dither_down_en = true;
+		break;
+	case MEDIA_BUS_FMT_YUYV10_1X20:
+	case MEDIA_BUS_FMT_YUV10_1X30:
+	case MEDIA_BUS_FMT_UYYVYY10_0_5X30:
+	case MEDIA_BUS_FMT_RGB101010_1X30:
+		dither_down_en = false;
+		pre_dither_down_en = false;
+		break;
+	case MEDIA_BUS_FMT_RGB888_3X8:
+	case MEDIA_BUS_FMT_RGB888_DUMMY_4X8:
+	case MEDIA_BUS_FMT_RGB888_1X24:
+	case MEDIA_BUS_FMT_RGB888_1X7X4_SPWG:
+	case MEDIA_BUS_FMT_RGB888_1X7X4_JEIDA:
+	default:
+		dither_down_en = false;
+		pre_dither_down_en = true;
+		break;
+	}
+
+	if (is_yuv_output(bus_format))
+		pre_dither_down_en = false;
+
+	vop2_mask_write(vop2, RK3568_VP0_DSP_CTRL + vp_offset, EN_MASK,
+			PRE_DITHER_DOWN_EN_SHIFT, pre_dither_down_en, false);
+	vop2_mask_write(vop2, RK3568_VP0_DSP_CTRL + vp_offset, EN_MASK,
+			DITHER_DOWN_EN_SHIFT, dither_down_en, false);
+	vop2_mask_write(vop2, RK3568_VP0_DSP_CTRL + vp_offset, EN_MASK,
+			DITHER_DOWN_MODE_SHIFT, dither_down_mode, false);
 }
 
 static int rockchip_vop2_init(struct display_state *state)
@@ -3667,9 +3680,6 @@ static int rockchip_vop2_init(struct display_state *state)
 	u32 vp_offset = (cstate->crtc_id * 0x100);
 	u32 line_flag_offset = (cstate->crtc_id * 4);
 	u32 val, act_end;
-	u8 dither_down_en = 0;
-	u8 dither_down_mode = 0;
-	u8 pre_dither_down_en = 0;
 	u8 dclk_div_factor = 0;
 	char output_type_name[30] = {0};
 #ifndef CONFIG_SPL_BUILD
@@ -3685,8 +3695,8 @@ static int rockchip_vop2_init(struct display_state *state)
 	printf("VOP update mode to: %dx%d%s%d, type:%s for VP%d\n",
 	       mode->crtc_hdisplay, mode->vdisplay,
 	       mode->flags & DRM_MODE_FLAG_INTERLACE ? "i" : "p",
-	       vop2_get_vrefresh(state),
-	       get_output_if_name(conn_state->output_if, output_type_name),
+	       mode->vrefresh,
+	       rockchip_get_output_if_name(conn_state->output_if, output_type_name),
 	       cstate->crtc_id);
 
 	if (mode->hdisplay > VOP2_MAX_VP_OUTPUT_WIDTH) {
@@ -3726,49 +3736,9 @@ static int rockchip_vop2_init(struct display_state *state)
 	vop2_mask_write(vop2, RK3568_VP0_DSP_CTRL + vp_offset, OUT_MODE_MASK,
 			OUT_MODE_SHIFT, conn_state->output_mode, false);
 
-	switch (conn_state->bus_format) {
-	case MEDIA_BUS_FMT_RGB565_1X16:
-		dither_down_en = 1;
-		dither_down_mode = RGB888_TO_RGB565;
-		pre_dither_down_en = 1;
-		break;
-	case MEDIA_BUS_FMT_RGB666_1X18:
-	case MEDIA_BUS_FMT_RGB666_1X24_CPADHI:
-	case MEDIA_BUS_FMT_RGB666_1X7X3_SPWG:
-	case MEDIA_BUS_FMT_RGB666_1X7X3_JEIDA:
-		dither_down_en = 1;
-		dither_down_mode = RGB888_TO_RGB666;
-		pre_dither_down_en = 1;
-		break;
-	case MEDIA_BUS_FMT_YUV8_1X24:
-	case MEDIA_BUS_FMT_UYYVYY8_0_5X24:
-		dither_down_en = 0;
-		pre_dither_down_en = 1;
-		break;
-	case MEDIA_BUS_FMT_YUV10_1X30:
-	case MEDIA_BUS_FMT_UYYVYY10_0_5X30:
-		dither_down_en = 0;
-		pre_dither_down_en = 0;
-		break;
-	case MEDIA_BUS_FMT_YUYV10_1X20:
-	case MEDIA_BUS_FMT_RGB888_1X24:
-	case MEDIA_BUS_FMT_RGB888_1X7X4_SPWG:
-	case MEDIA_BUS_FMT_RGB888_1X7X4_JEIDA:
-	case MEDIA_BUS_FMT_RGB101010_1X30:
-	default:
-		dither_down_en = 0;
-		pre_dither_down_en = 1;
-		break;
-	}
-
-	vop2_mask_write(vop2, RK3568_VP0_DSP_CTRL + vp_offset, EN_MASK,
-			DITHER_DOWN_EN_SHIFT, dither_down_en, false);
-	vop2_mask_write(vop2, RK3568_VP0_DSP_CTRL + vp_offset, EN_MASK,
-			DITHER_DOWN_MODE_SHIFT, dither_down_mode, false);
-	vop2_mask_write(vop2, RK3568_VP0_DSP_CTRL + vp_offset, EN_MASK,
-			PRE_DITHER_DOWN_EN_SHIFT, pre_dither_down_en, false);
-	vop2_mask_write(vop2, RK3568_VP0_DSP_CTRL + vp_offset, EN_MASK,
-			DITHER_DOWN_MODE_SHIFT, dither_down_mode, false);
+	vop2_dither_setup(vop2, conn_state->bus_format, cstate->crtc_id);
+	if (cstate->splice_mode)
+		vop2_dither_setup(vop2, conn_state->bus_format, cstate->splice_crtc_id);
 
 	yuv_overlay = is_yuv_output(conn_state->bus_format) ? 1 : 0;
 	vop2_mask_write(vop2, RK3568_OVL_CTRL, EN_MASK, cstate->crtc_id,
@@ -3948,12 +3918,16 @@ static int rockchip_vop2_init(struct display_state *state)
 		       __func__, cstate->crtc_id, dclk_rate, ret);
 		return ret;
 	} else {
-		dclk_div_factor = mode->clock / dclk_rate;
-		if (vop2->version == VOP_VERSION_RK3528 &&
-		    conn_state->output_if & VOP_OUTPUT_IF_BT656)
-			mode->crtc_clock = ret / 4 / 1000;
-		else
-			mode->crtc_clock = ret * dclk_div_factor / 1000;
+		if (cstate->mcu_timing.mcu_pix_total) {
+			mode->crtc_clock = roundup(ret, 1000) / 1000;
+		} else {
+			dclk_div_factor = mode->clock / dclk_rate;
+			if (vop2->version == VOP_VERSION_RK3528 &&
+			    conn_state->output_if & VOP_OUTPUT_IF_BT656)
+				mode->crtc_clock = roundup(ret, 1000) / 4 / 1000;
+			else
+				mode->crtc_clock = roundup(ret, 1000) * dclk_div_factor / 1000;
+		}
 		printf("VP%d set crtc_clock to %dKHz\n", cstate->crtc_id, mode->crtc_clock);
 	}
 
@@ -4143,7 +4117,12 @@ static bool vop2_win_dither_up(uint32_t format)
 	}
 }
 
-static void vop2_set_cluster_win(struct display_state *state, struct vop2_win_data *win)
+static bool vop2_is_mirror_win(struct vop2_win_data *win)
+{
+	return soc_is_rk3566() && (win->feature & WIN_FEATURE_MIRROR);
+}
+
+static int vop2_set_cluster_win(struct display_state *state, struct vop2_win_data *win)
 {
 	struct crtc_state *cstate = &state->crtc_state;
 	struct connector_state *conn_state = &state->conn_state;
@@ -4234,9 +4213,11 @@ static void vop2_set_cluster_win(struct display_state *state, struct vop2_win_da
 	vop2_mask_write(vop2, RK3568_CLUSTER0_CTRL + win_offset, EN_MASK, CLUSTER_EN_SHIFT, 1, false);
 
 	vop2_writel(vop2, RK3568_REG_CFG_DONE, cfg_done);
+
+	return 0;
 }
 
-static void vop2_set_smart_win(struct display_state *state, struct vop2_win_data *win)
+static int vop2_set_smart_win(struct display_state *state, struct vop2_win_data *win)
 {
 	struct crtc_state *cstate = &state->crtc_state;
 	struct connector_state *conn_state = &state->conn_state;
@@ -4257,7 +4238,23 @@ static void vop2_set_smart_win(struct display_state *state, struct vop2_win_data
 	u32 splice_yrgb_offset = 0;
 	u32 win_offset = win->reg_offset;
 	u32 cfg_done = CFG_DONE_EN | BIT(cstate->crtc_id) | (BIT(cstate->crtc_id) << 16);
+	u32 val;
 	bool dither_up;
+
+	if (vop2_is_mirror_win(win)) {
+		struct vop2_win_data *source_win = vop2_find_win_by_phys_id(vop2, win->source_win_id);
+
+		if (!source_win) {
+			printf("invalid source win id %d\n", win->source_win_id);
+			return -ENODEV;
+		}
+
+		val = vop2_readl(vop2, RK3568_ESMART0_REGION0_CTRL + source_win->reg_offset);
+		if (!(val & BIT(WIN_EN_SHIFT))) {
+			printf("WARN: the source win should be enabled before mirror win\n");
+			return -EAGAIN;
+		}
+	}
 
 	if (win->splice_mode_right) {
 		src_w = cstate->right_src_rect.w;
@@ -4338,6 +4335,8 @@ static void vop2_set_smart_win(struct display_state *state, struct vop2_win_data
 			REGION0_DITHER_UP_EN_SHIFT, dither_up, false);
 
 	vop2_writel(vop2, RK3568_REG_CFG_DONE, cfg_done);
+
+	return 0;
 }
 
 static void vop2_calc_display_rect_for_splice(struct display_state *state)
@@ -4393,6 +4392,7 @@ static int rockchip_vop2_set_plane(struct display_state *state)
 	struct vop2_win_data *splice_win_data;
 	u8 primary_plane_id = vop2->vp_plane_mask[cstate->crtc_id].primary_plane_id;
 	char plane_name[10] = {0};
+	int ret;
 
 	if (cstate->crtc_rect.w > cstate->max_output.width) {
 		printf("ERROR: output w[%d] exceeded max width[%d]\n",
@@ -4436,9 +4436,11 @@ static int rockchip_vop2_set_plane(struct display_state *state)
 	}
 
 	if (win_data->type == CLUSTER_LAYER)
-		vop2_set_cluster_win(state, win_data);
+		ret = vop2_set_cluster_win(state, win_data);
 	else
-		vop2_set_smart_win(state, win_data);
+		ret = vop2_set_smart_win(state, win_data);
+	if (ret)
+		return ret;
 
 	printf("VOP VP%d enable %s[%dx%d->%dx%d@%dx%d] fmt[%d] addr[0x%x]\n",
 		cstate->crtc_id, get_plane_name(primary_plane_id, plane_name),
@@ -4660,20 +4662,9 @@ static int rockchip_vop2_mode_fixup(struct display_state *state)
 	if (vop2->version == VOP_VERSION_RK3528 && conn_state->output_if & VOP_OUTPUT_IF_BT656)
 		mode->crtc_clock *= 4;
 
-	if (cstate->mcu_timing.mcu_pix_total) {
-		if (conn_state->output_mode == ROCKCHIP_OUT_MODE_S888)
-			/*
-			 * For serial output_mode rgb3x8, one pixel need 3 cycles.
-			 * So dclk should be three times mode clock.
-			 */
-			mode->crtc_clock *= 3;
-		else if (conn_state->output_mode == ROCKCHIP_OUT_MODE_S888_DUMMY)
-			/*
-			 * For serial output_mode argb4x8, one pixel need 4 cycles.
-			 * So dclk should be four times mode clock.
-			 */
-			mode->crtc_clock *= 4;
-	}
+	mode->crtc_clock *= rockchip_drm_get_cycles_per_pixel(conn_state->bus_format);
+	if (cstate->mcu_timing.mcu_pix_total)
+		mode->crtc_clock *= cstate->mcu_timing.mcu_pix_total + 1;
 
 	if (conn_state->secondary) {
 		mode->crtc_clock *= 2;
@@ -5335,6 +5326,8 @@ static struct vop2_win_data rk3568_win_data[6] = {
 		.vsd_filter_mode = VOP2_SCALE_DOWN_BIL,
 		.max_upscale_factor = 4,
 		.max_downscale_factor = 4,
+		.source_win_id = ROCKCHIP_VOP2_CLUSTER0,
+		.feature = WIN_FEATURE_MIRROR,
 	},
 
 	{
@@ -5365,6 +5358,8 @@ static struct vop2_win_data rk3568_win_data[6] = {
 		.vsd_filter_mode = VOP2_SCALE_DOWN_BIL,
 		.max_upscale_factor = 8,
 		.max_downscale_factor = 8,
+		.source_win_id = ROCKCHIP_VOP2_ESMART0,
+		.feature = WIN_FEATURE_MIRROR,
 	},
 
 	{
@@ -5395,6 +5390,8 @@ static struct vop2_win_data rk3568_win_data[6] = {
 		.vsd_filter_mode = VOP2_SCALE_DOWN_BIL,
 		.max_upscale_factor = 8,
 		.max_downscale_factor = 8,
+		.source_win_id = ROCKCHIP_VOP2_SMART0,
+		.feature = WIN_FEATURE_MIRROR,
 	},
 };
 
