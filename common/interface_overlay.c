@@ -775,6 +775,9 @@ void parse_cmdline(void)
 		if(count > 0) {
 			offset = offset + count;
 			continue;
+		} else {
+			valid = -1;
+			break;
 		}
 	}
 
@@ -850,6 +853,9 @@ void parse_hw_config(struct hw_config *hw_conf)
 		if(count > 0) {
 			offset = offset + count;
 			continue;
+		} else {
+			valid = -1;
+			break;
 		}
 	}
 end:
