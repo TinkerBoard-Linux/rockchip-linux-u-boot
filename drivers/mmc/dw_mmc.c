@@ -241,6 +241,10 @@ static int dwmci_data_transfer(struct dwmci_host *host, struct mmc_data *data)
 		buf = (unsigned int *)data->src;
 
 	timeout = dwmci_get_drto(host, size);
+	/* The tuning data is 128bytes, a timeout of 1ms is sufficient.*/
+	if ((dwmci_readl(host, DWMCI_CMD) & 0x1F) == MMC_SEND_TUNING_BLOCK_HS200)
+		timeout = 1;
+
 	size /= 4;
 
 	for (;;) {
@@ -248,6 +252,11 @@ static int dwmci_data_transfer(struct dwmci_host *host, struct mmc_data *data)
 		/* Error during data transfer. */
 		if (mask & (DWMCI_DATA_ERR | DWMCI_DATA_TOUT)) {
 			debug("%s: DATA ERROR!\n", __func__);
+			/*
+			 * It is necessary to wait for several cycles before
+			 * resetting the controller while data timeout or error.
+			 */
+			udelay(1);
 			dwmci_wait_reset(host, DWMCI_RESET_ALL);
 			dwmci_writel(host, DWMCI_CMD, DWMCI_CMD_PRV_DAT_WAIT |
 				     DWMCI_CMD_UPD_CLK | DWMCI_CMD_START);

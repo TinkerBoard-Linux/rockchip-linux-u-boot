@@ -7,6 +7,8 @@
 #ifndef __CONFIG_RK3568_COMMON_H
 #define __CONFIG_RK3568_COMMON_H
 
+#define CFG_CPUID_OFFSET		0xa
+
 #include "rockchip-common.h"
 
 #define CONFIG_SPL_FRAMEWORK
@@ -58,6 +60,7 @@
 					 CONFIG_SYS_SCSI_MAX_LUN)
 #endif
 /* Nand */
+#define CONFIG_SYS_NAND_BASE		0xFE330000
 #define CONFIG_SYS_MAX_NAND_DEVICE	1
 #define CONFIG_SYS_NAND_ONFI_DETECTION
 #define CONFIG_SYS_NAND_PAGE_SIZE	2048

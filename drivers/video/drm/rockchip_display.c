@@ -1476,7 +1476,7 @@ enum {
 	PORT_DIR_OUT,
 };
 
-static const struct device_node *rockchip_of_graph_get_port_by_id(ofnode node, int id)
+const struct device_node *rockchip_of_graph_get_port_by_id(ofnode node, int id)
 {
 	ofnode ports, port;
 	u32 reg;
@@ -1733,6 +1733,7 @@ static struct rockchip_connector *rockchip_get_split_connector(struct rockchip_c
 	int ret;
 
 	split_mode = ofnode_read_bool(conn->dev->node, "split-mode");
+	split_mode |= ofnode_read_bool(conn->dev->node, "dual-channel");
 	if (!split_mode)
 		return NULL;
 
@@ -1745,6 +1746,9 @@ static struct rockchip_connector *rockchip_get_split_connector(struct rockchip_c
 		break;
 	case DRM_MODE_CONNECTOR_HDMIA:
 		conn_name = "hdmi";
+		break;
+	case DRM_MODE_CONNECTOR_LVDS:
+		conn_name = "lvds";
 		break;
 	default:
 		return NULL;
@@ -2157,7 +2161,8 @@ void rockchip_display_fixup(void *blob)
 			continue;
 		}
 
-		if (s->conn_state.secondary) {
+		if (s->conn_state.secondary &&
+		    s->conn_state.secondary->type != DRM_MODE_CONNECTOR_LVDS) {
 			s->conn_state.mode.clock *= 2;
 			s->conn_state.mode.hdisplay *= 2;
 		}

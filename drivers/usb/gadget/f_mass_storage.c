@@ -324,6 +324,7 @@ struct fsg_common {
 	u32			tag;
 	u32			residue;
 	u32			usb_amount_left;
+	u32			usb_trb_size;	/* usb transfer size */
 
 	unsigned int		can_stall:1;
 	unsigned int		free_storage_on_release:1;
@@ -690,6 +691,12 @@ static int sleep_thread(struct fsg_common *common)
 			k = 0;
 		}
 
+#ifdef CONFIG_USB_DWC3_GADGET
+		if (rkusb_usb3_capable() && !dwc3_gadget_is_connected()
+		    && !rkusb_force_usb2_enabled())
+			return -ENODEV;
+#endif
+
 		usb_gadget_handle_interrupts(0);
 	}
 	common->thread_wakeup_needed = 0;
@@ -784,7 +791,7 @@ static int do_read(struct fsg_common *common)
 		 *	the next page.
 		 * If this means reading 0 then we were asked to read past
 		 *	the end of file. */
-		amount = min(amount_left, FSG_BUFLEN);
+		amount = min(amount_left, common->usb_trb_size);
 		partial_page = file_offset & (PAGE_CACHE_SIZE - 1);
 		if (partial_page > 0)
 			amount = min(amount, (unsigned int) PAGE_CACHE_SIZE -
@@ -924,7 +931,7 @@ static int do_write(struct fsg_common *common)
 			 * If this means getting 0, then we were asked
 			 *	to write past the end of file.
 			 * Finally, round down to a block boundary. */
-			amount = min(amount_left_to_req, FSG_BUFLEN);
+			amount = min(amount_left_to_req, common->usb_trb_size);
 			partial_page = usb_offset & (PAGE_CACHE_SIZE - 1);
 			if (partial_page > 0)
 				amount = min(amount,
@@ -1096,7 +1103,7 @@ static int do_verify(struct fsg_common *common)
 		 * And don't try to read past the end of the file.
 		 * If this means reading 0 then we were asked to read
 		 * past the end of file. */
-		amount = min(amount_left, FSG_BUFLEN);
+		amount = min(amount_left, common->usb_trb_size);
 		if (amount == 0) {
 			curlun->sense_data =
 					SS_LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE;
@@ -1491,7 +1498,8 @@ static int pad_with_zeros(struct fsg_dev *fsg)
 				return rc;
 		}
 
-		nsend = min(fsg->common->usb_amount_left, FSG_BUFLEN);
+		nsend = min(fsg->common->usb_amount_left,
+			    fsg->common->usb_trb_size);
 		memset(bh->buf + nkeep, 0, nsend - nkeep);
 		bh->inreq->length = nsend;
 		bh->inreq->zero = 0;
@@ -1533,7 +1541,8 @@ static int throw_away_data(struct fsg_common *common)
 		bh = common->next_buffhd_to_fill;
 		if (bh->state == BUF_STATE_EMPTY
 		 && common->usb_amount_left > 0) {
-			amount = min(common->usb_amount_left, FSG_BUFLEN);
+			amount = min(common->usb_amount_left,
+				     common->usb_trb_size);
 
 			/* amount is always divisible by 512, hence by
 			 * the bulk-out maxpacket size */
@@ -2550,6 +2559,7 @@ static struct fsg_common *fsg_common_init(struct fsg_common *common,
 	common->gadget = gadget;
 	common->ep0 = gadget->ep0;
 	common->ep0req = cdev->req;
+	common->usb_trb_size = FSG_BUFLEN;
 
 	/* Maybe allocate device-global string IDs, and patch descriptors */
 	if (fsg_strings[FSG_STRING_INTERFACE].id == 0) {

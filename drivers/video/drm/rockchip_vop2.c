@@ -86,10 +86,14 @@
 
 #define RK3568_DSP_IF_CTRL			0x02c
 #define LVDS_DUAL_EN_SHIFT			0
+#define RK3588_BT656_UV_SWAP_SHIFT		0
 #define LVDS_DUAL_LEFT_RIGHT_EN_SHIFT		1
+#define RK3588_BT656_YC_SWAP_SHIFT		1
 #define LVDS_DUAL_SWAP_EN_SHIFT			2
 #define BT656_UV_SWAP				4
+#define RK3588_BT1120_UV_SWAP_SHIFT		4
 #define BT656_YC_SWAP				5
+#define RK3588_BT1120_YC_SWAP_SHIFT		5
 #define BT656_DCLK_POL				6
 #define RK3588_HDMI_DUAL_EN_SHIFT		8
 #define RK3588_EDP_DUAL_EN_SHIFT		8
@@ -879,6 +883,9 @@
 #define GRF_BT1120_CLK_INV_SHIFT		2
 #define GRF_RGB_DCLK_INV_SHIFT			3
 
+#define RK3588_GRF_SOC_CON1			0x0304
+#define RK3588_GRF_VOP_DCLK_INV_SEL_SHIFT	14
+
 #define RK3588_GRF_VOP_CON2			0x0008
 #define RK3588_GRF_EDP0_ENABLE_SHIFT		0
 #define RK3588_GRF_HDMITX0_ENABLE_SHIFT		1
@@ -1550,6 +1557,19 @@ static bool is_rb_swap(u32 bus_format, u32 output_mode)
 		return true;
 	else
 		return false;
+}
+
+static bool is_yc_swap(u32 bus_format)
+{
+	switch (bus_format) {
+	case MEDIA_BUS_FMT_YUYV8_1X16:
+	case MEDIA_BUS_FMT_YVYU8_1X16:
+	case MEDIA_BUS_FMT_YUYV8_2X8:
+	case MEDIA_BUS_FMT_YVYU8_2X8:
+		return true;
+	default:
+		return false;
+	}
 }
 
 static inline bool is_hot_plug_devices(int output_type)
@@ -2508,6 +2528,7 @@ static int rockchip_vop2_preinit(struct display_state *state)
 {
 	struct crtc_state *cstate = &state->crtc_state;
 	const struct vop2_data *vop2_data = cstate->crtc->data;
+	struct regmap *map;
 
 	if (!rockchip_vop2) {
 		rockchip_vop2 = calloc(1, sizeof(struct vop2));
@@ -2520,23 +2541,24 @@ static int rockchip_vop2_preinit(struct display_state *state)
 		rockchip_vop2->regs = (void *)RK3528_VOP_BASE;
 #else
 		rockchip_vop2->regs = dev_read_addr_ptr(cstate->dev);
-		rockchip_vop2->grf = syscon_get_first_range(ROCKCHIP_SYSCON_GRF);
+		map = syscon_regmap_lookup_by_phandle(cstate->dev, "rockchip,grf");
+		rockchip_vop2->grf = regmap_get_range(map, 0);
 		if (rockchip_vop2->grf <= 0)
 			printf("%s: Get syscon grf failed (ret=%p)\n", __func__, rockchip_vop2->grf);
 #endif
 		rockchip_vop2->version = vop2_data->version;
 		rockchip_vop2->data = vop2_data;
 		if (rockchip_vop2->version == VOP_VERSION_RK3588) {
-			struct regmap *map;
-
-			rockchip_vop2->vop_grf = syscon_get_first_range(ROCKCHIP_SYSCON_VOP_GRF);
+			map = syscon_regmap_lookup_by_phandle(cstate->dev, "rockchip,vop-grf");
+			rockchip_vop2->vop_grf = regmap_get_range(map, 0);
 			if (rockchip_vop2->vop_grf <= 0)
 				printf("%s: Get syscon vop_grf failed (ret=%p)\n", __func__, rockchip_vop2->vop_grf);
 			map = syscon_regmap_lookup_by_phandle(cstate->dev, "rockchip,vo1-grf");
 			rockchip_vop2->vo1_grf = regmap_get_range(map, 0);
 			if (rockchip_vop2->vo1_grf <= 0)
 				printf("%s: Get syscon vo1_grf failed (ret=%p)\n", __func__, rockchip_vop2->vo1_grf);
-			rockchip_vop2->sys_pmu = syscon_get_first_range(ROCKCHIP_SYSCON_PMU);
+			map = syscon_regmap_lookup_by_phandle(cstate->dev, "rockchip,pmu");
+			rockchip_vop2->sys_pmu = regmap_get_range(map, 0);
 			if (rockchip_vop2->sys_pmu <= 0)
 				printf("%s: Get syscon sys_pmu failed (ret=%p)\n", __func__, rockchip_vop2->sys_pmu);
 		}
@@ -2738,8 +2760,10 @@ static unsigned long rk3588_vop2_if_cfg(struct display_state *state)
 	int if_pixclk_div = 0;
 	int if_dclk_div = 0;
 	unsigned long dclk_rate;
+	bool dclk_inv, yc_swap = false;
 	u32 val;
 
+	dclk_inv = (conn_state->bus_flags & DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE) ? 1 : 0;
 	if (output_if & (VOP_OUTPUT_IF_HDMI0 | VOP_OUTPUT_IF_HDMI1)) {
 		val = (mode->flags & DRM_MODE_FLAG_NHSYNC) ? BIT(HSYNC_POSITIVE) : 0;
 		val |= (mode->flags & DRM_MODE_FLAG_NVSYNC) ? BIT(VSYNC_POSITIVE) : 0;
@@ -2774,16 +2798,28 @@ static unsigned long rk3588_vop2_if_cfg(struct display_state *state)
 	if (output_if & VOP_OUTPUT_IF_RGB) {
 		vop2_mask_write(vop2, RK3568_DSP_IF_EN, 0x7, RK3588_RGB_EN_SHIFT,
 				4, false);
+		vop2_grf_writel(vop2, vop2->grf, RK3588_GRF_SOC_CON1, EN_MASK,
+				RK3588_GRF_VOP_DCLK_INV_SEL_SHIFT, !dclk_inv);
 	}
 
 	if (output_if & VOP_OUTPUT_IF_BT1120) {
 		vop2_mask_write(vop2, RK3568_DSP_IF_EN, 0x7, RK3588_RGB_EN_SHIFT,
 				3, false);
+		vop2_grf_writel(vop2, vop2->grf, RK3588_GRF_SOC_CON1, EN_MASK,
+				RK3588_GRF_VOP_DCLK_INV_SEL_SHIFT, !dclk_inv);
+		yc_swap = is_yc_swap(conn_state->bus_format);
+		vop2_mask_write(vop2, RK3568_DSP_IF_CTRL, EN_MASK, RK3588_BT1120_YC_SWAP_SHIFT,
+				yc_swap, false);
 	}
 
 	if (output_if & VOP_OUTPUT_IF_BT656) {
 		vop2_mask_write(vop2, RK3568_DSP_IF_EN, 0x7, RK3588_RGB_EN_SHIFT,
 				2, false);
+		vop2_grf_writel(vop2, vop2->grf, RK3588_GRF_SOC_CON1, EN_MASK,
+				RK3588_GRF_VOP_DCLK_INV_SEL_SHIFT, !dclk_inv);
+		yc_swap = is_yc_swap(conn_state->bus_format);
+		vop2_mask_write(vop2, RK3568_DSP_IF_CTRL, EN_MASK, RK3588_BT656_YC_SWAP_SHIFT,
+				yc_swap, false);
 	}
 
 	if (output_if & VOP_OUTPUT_IF_MIPI0) {
@@ -2957,13 +2993,47 @@ static unsigned long rk3588_vop2_if_cfg(struct display_state *state)
 	return dclk_rate;
 }
 
+static void rk3568_vop2_setup_dual_channel_if(struct display_state *state)
+{
+	struct crtc_state *cstate = &state->crtc_state;
+	struct connector_state *conn_state = &state->conn_state;
+	struct vop2 *vop2 = cstate->private;
+	u32 vp_offset = (cstate->crtc_id * 0x100);
+
+	if (conn_state->output_flags &
+	    ROCKCHIP_OUTPUT_DUAL_CHANNEL_ODD_EVEN_MODE) {
+		vop2_mask_write(vop2, RK3568_DSP_IF_CTRL, EN_MASK,
+				LVDS_DUAL_EN_SHIFT, 1, false);
+		vop2_mask_write(vop2, RK3568_DSP_IF_CTRL, EN_MASK,
+				LVDS_DUAL_LEFT_RIGHT_EN_SHIFT, 0, false);
+		if (conn_state->output_flags & ROCKCHIP_OUTPUT_DATA_SWAP)
+			vop2_mask_write(vop2, RK3568_DSP_IF_CTRL, EN_MASK,
+					LVDS_DUAL_SWAP_EN_SHIFT, 1, false);
+
+		return;
+	}
+
+	vop2_mask_write(vop2, RK3568_VP0_MIPI_CTRL + vp_offset, EN_MASK,
+			MIPI_DUAL_EN_SHIFT, 1, false);
+	if (conn_state->output_flags & ROCKCHIP_OUTPUT_DATA_SWAP) {
+		vop2_mask_write(vop2, RK3568_VP0_MIPI_CTRL + vp_offset, EN_MASK,
+				MIPI_DUAL_SWAP_EN_SHIFT, 1, false);
+	}
+
+	if (conn_state->output_if & VOP_OUTPUT_IF_LVDS1) {
+		vop2_mask_write(vop2, RK3568_DSP_IF_CTRL, EN_MASK,
+				LVDS_DUAL_EN_SHIFT, 1, false);
+		vop2_mask_write(vop2, RK3568_DSP_IF_CTRL, EN_MASK,
+				LVDS_DUAL_LEFT_RIGHT_EN_SHIFT, 1, false);
+	}
+}
+
 static unsigned long rk3568_vop2_if_cfg(struct display_state *state)
 {
 	struct crtc_state *cstate = &state->crtc_state;
 	struct connector_state *conn_state = &state->conn_state;
 	struct drm_display_mode *mode = &conn_state->mode;
 	struct vop2 *vop2 = cstate->private;
-	u32 vp_offset = (cstate->crtc_id * 0x100);
 	bool dclk_inv;
 	u32 val;
 
@@ -3024,20 +3094,6 @@ static unsigned long rk3568_vop2_if_cfg(struct display_state *state)
 				IF_CTRL_RGB_LVDS_DCLK_POL_SHIFT, dclk_inv, false);
 	}
 
-	if (conn_state->output_flags &
-	    (ROCKCHIP_OUTPUT_DUAL_CHANNEL_ODD_EVEN_MODE |
-	     ROCKCHIP_OUTPUT_DUAL_CHANNEL_LEFT_RIGHT_MODE)) {
-		vop2_mask_write(vop2, RK3568_DSP_IF_CTRL, EN_MASK,
-				LVDS_DUAL_EN_SHIFT, 1, false);
-		if (conn_state->output_flags &
-		    ROCKCHIP_OUTPUT_DUAL_CHANNEL_LEFT_RIGHT_MODE)
-			vop2_mask_write(vop2, RK3568_DSP_IF_CTRL, EN_MASK,
-					LVDS_DUAL_LEFT_RIGHT_EN_SHIFT, 1,
-					false);
-		if (conn_state->output_flags & ROCKCHIP_OUTPUT_DATA_SWAP)
-			vop2_mask_write(vop2, RK3568_DSP_IF_CTRL, EN_MASK,
-					LVDS_DUAL_SWAP_EN_SHIFT, 1, false);
-	}
 
 	if (conn_state->output_if & VOP_OUTPUT_IF_MIPI0) {
 		vop2_mask_write(vop2, RK3568_DSP_IF_EN, EN_MASK, MIPI0_EN_SHIFT,
@@ -3058,14 +3114,10 @@ static unsigned long rk3568_vop2_if_cfg(struct display_state *state)
 	}
 
 	if (conn_state->output_flags &
-	    ROCKCHIP_OUTPUT_DUAL_CHANNEL_LEFT_RIGHT_MODE) {
-		vop2_mask_write(vop2, RK3568_VP0_MIPI_CTRL + vp_offset, EN_MASK,
-				MIPI_DUAL_EN_SHIFT, 1, false);
-		if (conn_state->output_flags & ROCKCHIP_OUTPUT_DATA_SWAP)
-			vop2_mask_write(vop2, RK3568_VP0_MIPI_CTRL + vp_offset,
-					EN_MASK, MIPI_DUAL_SWAP_EN_SHIFT, 1,
-					false);
-	}
+		    ROCKCHIP_OUTPUT_DUAL_CHANNEL_LEFT_RIGHT_MODE ||
+	    conn_state->output_flags &
+		    ROCKCHIP_OUTPUT_DUAL_CHANNEL_ODD_EVEN_MODE)
+		rk3568_vop2_setup_dual_channel_if(state);
 
 	if (conn_state->output_if & VOP_OUTPUT_IF_eDP0) {
 		vop2_mask_write(vop2, RK3568_DSP_IF_EN, EN_MASK, EDP0_EN_SHIFT,
@@ -3090,7 +3142,7 @@ static unsigned long rk3568_vop2_if_cfg(struct display_state *state)
 				IF_CRTL_HDMI_PIN_POL_SHIT, val, false);
 	}
 
-	return mode->clock;
+	return mode->crtc_clock;
 }
 
 static unsigned long rk3528_vop2_if_cfg(struct display_state *state)
@@ -3727,8 +3779,9 @@ static int rockchip_vop2_init(struct display_state *state)
 	else if (vop2->version == VOP_VERSION_RK3562)
 		dclk_rate = rk3562_vop2_if_cfg(state);
 
-	if (conn_state->output_mode == ROCKCHIP_OUT_MODE_AAAA &&
-	    !(cstate->feature & VOP_FEATURE_OUTPUT_10BIT))
+	if ((conn_state->output_mode == ROCKCHIP_OUT_MODE_AAAA &&
+	     !(cstate->feature & VOP_FEATURE_OUTPUT_10BIT)) ||
+	    conn_state->output_if & VOP_OUTPUT_IF_BT656)
 		conn_state->output_mode = ROCKCHIP_OUT_MODE_P888;
 
 	vop2_post_color_swap(state);
@@ -3921,12 +3974,8 @@ static int rockchip_vop2_init(struct display_state *state)
 		if (cstate->mcu_timing.mcu_pix_total) {
 			mode->crtc_clock = roundup(ret, 1000) / 1000;
 		} else {
-			dclk_div_factor = mode->clock / dclk_rate;
-			if (vop2->version == VOP_VERSION_RK3528 &&
-			    conn_state->output_if & VOP_OUTPUT_IF_BT656)
-				mode->crtc_clock = roundup(ret, 1000) / 4 / 1000;
-			else
-				mode->crtc_clock = roundup(ret, 1000) * dclk_div_factor / 1000;
+			dclk_div_factor = mode->crtc_clock / dclk_rate;
+			mode->crtc_clock = roundup(ret, 1000) * dclk_div_factor / 1000;
 		}
 		printf("VP%d set crtc_clock to %dKHz\n", cstate->crtc_id, mode->crtc_clock);
 	}
@@ -3965,12 +4014,30 @@ static void vop2_setup_scale(struct vop2 *vop2, struct vop2_win_data *win,
 		}
 	}
 
-	if (src_h >= (4 * dst_h)) {
-		ygt4 = 1;
-		src_h >>= 2;
-	} else if (src_h >= (2 * dst_h)) {
-		ygt2 = 1;
-		src_h >>= 1;
+	/**
+	 * The rk3528 is processed as 2 pixel/cycle,
+	 * so ygt2/ygt4 needs to be triggered in advance to improve performance
+	 * when src_w is bigger than 1920.
+	 * dst_h / src_h is at [1, 0.65)     ygt2=0; ygt4=0;
+	 * dst_h / src_h is at [0.65, 0.35)  ygt2=1; ygt4=0;
+	 * dst_h / src_h is at [0.35, 0)     ygt2=0; ygt4=1;
+	 */
+	if (vop2->version == VOP_VERSION_RK3528 && src_w > 1920) {
+		if (src_h >= (100 * dst_h / 35)) {
+			ygt4 = 1;
+			src_h >>= 2;
+		} else if ((src_h >= 100 * dst_h / 65) && (src_h < 100 * dst_h / 35)) {
+			ygt2 = 1;
+			src_h >>= 1;
+		}
+	} else {
+		if (src_h >= (4 * dst_h)) {
+			ygt4 = 1;
+			src_h >>= 2;
+		} else if (src_h >= (2 * dst_h)) {
+			ygt2 = 1;
+			src_h >>= 1;
+		}
 	}
 
 	yrgb_hor_scl_mode = scl_get_scl_mode(src_w, dst_w);
@@ -4666,7 +4733,8 @@ static int rockchip_vop2_mode_fixup(struct display_state *state)
 	if (cstate->mcu_timing.mcu_pix_total)
 		mode->crtc_clock *= cstate->mcu_timing.mcu_pix_total + 1;
 
-	if (conn_state->secondary) {
+	if (conn_state->secondary &&
+	    conn_state->secondary->type != DRM_MODE_CONNECTOR_LVDS) {
 		mode->crtc_clock *= 2;
 		mode->crtc_hdisplay *= 2;
 		mode->crtc_hsync_start *= 2;
