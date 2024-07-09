@@ -273,7 +273,8 @@ int boot_relocate_fdt(struct lmb *lmb, char **of_flat_tree, ulong *of_size)
 #ifdef CONFIG_RK3566_TB3
 		printf("intf.uart0 = %d\n", hw_conf.uart0);
 		printf("intf.uart1 = %d\n", hw_conf.uart1);
-		printf("intf.uart4 = %d\n", hw_conf.uart1);
+		printf("intf.uart4 = %d\n", hw_conf.uart4);
+		printf("intf.uart9 = %d\n", hw_conf.uart9);
 		printf("intf.i2c1 = %d\n", hw_conf.i2c1);
 		printf("intf.i2c5 = %d\n", hw_conf.i2c5);
 		printf("intf.i2s3_2ch = %d\n", hw_conf.i2s3_2ch);

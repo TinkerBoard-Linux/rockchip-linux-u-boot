@@ -264,6 +264,19 @@ static unsigned long get_intf_value(char *text, struct hw_config *hw_conf)
 			i = i + 3;
 		} else
 			goto invalid_line;
+	} else if(memcmp(text, "uart9=", 6) == 0) {
+		i = 6;
+		if(memcmp(text + i, "on", 2) == 0) {
+			hw_conf->uart9 = 1;
+			i = i + 2;
+			hw_conf->pwm12 = -1;
+			hw_conf->pwm13 = -1;
+			hw_conf->spi3 = -1;
+		} else if(memcmp(text + i, "off", 3) == 0) {
+			hw_conf->uart9 = -1;
+			i = i + 3;
+		} else
+			goto invalid_line;
 	} else if(memcmp(text, "i2c1=", 5) == 0) {
 		i = 5;
 		if(memcmp(text + i, "on", 2) == 0) {
@@ -313,6 +326,7 @@ static unsigned long get_intf_value(char *text, struct hw_config *hw_conf)
 			hw_conf->pwm13 = -1;
 			hw_conf->pwm14 = -1;
 			hw_conf->pwm15 = -1;
+			hw_conf->uart9 = -1;
 		} else if(memcmp(text + i, "off", 3) == 0) {
 			hw_conf->spi3 = -1;
 			i = i + 3;
@@ -411,6 +425,7 @@ static unsigned long get_intf_value(char *text, struct hw_config *hw_conf)
 			hw_conf->pwm12 = 1;
 			i = i + 2;
 			hw_conf->spi3 = -1;
+			hw_conf->uart9 = -1;
 		} else if(memcmp(text + i, "off", 3) == 0) {
 			hw_conf->pwm12 = -1;
 			i = i + 3;
@@ -422,6 +437,7 @@ static unsigned long get_intf_value(char *text, struct hw_config *hw_conf)
 			hw_conf->pwm13 = 1;
 			i = i + 2;
 			hw_conf->spi3 = -1;
+			hw_conf->uart9 = -1;
 		} else if(memcmp(text + i, "off", 3) == 0) {
 			hw_conf->pwm13 = -1;
 			i = i + 3;
@@ -1128,6 +1144,11 @@ void handle_hw_conf(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, struct hw_
 		set_hw_property(working_fdt, "/serial@fe680000", "status", "okay", 5);
 	else if (hw_conf->uart4 == -1)
 		set_hw_property(working_fdt, "/serial@fe680000", "status", "disabled", 9);
+
+	if (hw_conf->uart9 == 1)
+		set_hw_property(working_fdt, "/serial@fe6d0000", "status", "okay", 5);
+	else if (hw_conf->uart9 == -1)
+		set_hw_property(working_fdt, "/serial@fe6d0000", "status", "disabled", 9);
 
 	if (hw_conf->i2c1 == 1)
 		set_hw_property(working_fdt, "/i2c@fe5a0000", "status", "okay", 5);
