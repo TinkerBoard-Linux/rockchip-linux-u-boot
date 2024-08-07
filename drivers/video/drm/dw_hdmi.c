@@ -1601,7 +1601,7 @@ static void hdmi_config_AVI(struct dw_hdmi *hdmi, struct drm_display_mode *mode)
 	 * by the user
 	 */
 	drm_hdmi_avi_infoframe_quant_range(&frame, mode, rgb_quant_range,
-					   true);
+					   true, is_hdmi2);
 	if (hdmi_bus_fmt_is_yuv444(hdmi->hdmi_data.enc_out_bus_format))
 		frame.colorspace = HDMI_COLORSPACE_YUV444;
 	else if (hdmi_bus_fmt_is_yuv422(hdmi->hdmi_data.enc_out_bus_format))
@@ -2552,9 +2552,12 @@ int rockchip_dw_hdmi_get_timing(struct rockchip_connector *conn, struct display_
 	ret = drm_do_get_edid(&hdmi->adap, conn_state->edid);
 
 	if (!ret) {
-		hdmi->sink_is_hdmi =
-			drm_detect_hdmi_monitor(edid);
 		hdmi->sink_has_audio = drm_detect_monitor_audio(edid);
+		if (hdmi->sink_has_audio)
+			hdmi->sink_is_hdmi = true;
+		else
+			hdmi->sink_is_hdmi = drm_detect_hdmi_monitor(edid);
+
 		ret = drm_add_edid_modes(&hdmi->edid_data, conn_state->edid);
 	}
 	if (ret < 0) {
@@ -2637,14 +2640,26 @@ int rockchip_dw_hdmi_get_timing(struct rockchip_connector *conn, struct display_
 		enc_out_encoding = V4L2_YCBCR_ENC_709;
 
 	if (enc_out_encoding == V4L2_YCBCR_ENC_BT2020)
-		conn_state->color_space = V4L2_COLORSPACE_BT2020;
+		conn_state->color_encoding = DRM_COLOR_YCBCR_BT2020;
 	else if (bus_format == MEDIA_BUS_FMT_RGB888_1X24 ||
 		 bus_format == MEDIA_BUS_FMT_RGB101010_1X30)
-		conn_state->color_space = V4L2_COLORSPACE_DEFAULT;
+		conn_state->color_encoding = DRM_COLOR_YCBCR_BT709;
 	else if (enc_out_encoding == V4L2_YCBCR_ENC_709)
-		conn_state->color_space = V4L2_COLORSPACE_REC709;
+		conn_state->color_encoding = DRM_COLOR_YCBCR_BT709;
 	else
-		conn_state->color_space = V4L2_COLORSPACE_SMPTE170M;
+		conn_state->color_encoding = DRM_COLOR_YCBCR_BT601;
+
+	if (bus_format == MEDIA_BUS_FMT_RGB888_1X24 ||
+	    bus_format == MEDIA_BUS_FMT_RGB101010_1X30)
+		conn_state->color_range = hdmi->hdmi_data.quant_range ==
+					  HDMI_QUANTIZATION_RANGE_LIMITED ?
+					  DRM_COLOR_YCBCR_LIMITED_RANGE :
+					  DRM_COLOR_YCBCR_FULL_RANGE;
+	else
+		conn_state->color_range = hdmi->hdmi_data.quant_range ==
+					  HDMI_QUANTIZATION_RANGE_FULL ?
+					  DRM_COLOR_YCBCR_FULL_RANGE :
+					  DRM_COLOR_YCBCR_LIMITED_RANGE;
 
 	return 0;
 }
