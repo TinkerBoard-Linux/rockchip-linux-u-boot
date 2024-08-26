@@ -296,6 +296,10 @@ int boot_relocate_fdt(struct lmb *lmb, char **of_flat_tree, ulong *of_size)
 		printf("conf.hdmi = %d\n", hw_conf.hdmi);
 		printf("conf.dsi0 = %d\n", hw_conf.dsi0);
 #endif
+#ifdef CONFIG_RK3566_TB3_RV
+		printf("intf.pwm1 = %d\n", hw_conf.pwm1);
+		printf("intf.pwm5 = %d\n", hw_conf.pwm5);
+#endif
 		printf("conf.auto_ums = %d\n", hw_conf.auto_ums);
 
 		for (int i = 0; i < hw_conf.overlay_count; i++)

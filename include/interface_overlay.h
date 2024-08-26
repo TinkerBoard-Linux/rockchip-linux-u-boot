@@ -20,8 +20,11 @@ struct hw_config
 	int pwm0, pwm1, pwm2, pwm5, pwm7, pwm8, pwm9, pwm12, pwm13, pwm14, pwm15;
 	int xin32k;
 
-
 	int hdmi, dsi0;
+#endif
+
+#ifdef CONFIG_RK3566_TB3_RV
+	int pwm1, pwm5;
 #endif
 	int auto_ums;
 

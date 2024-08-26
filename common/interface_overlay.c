@@ -477,6 +477,28 @@ static unsigned long get_intf_value(char *text, struct hw_config *hw_conf)
 		} else
 			goto invalid_line;
 #endif
+#ifdef CONFIG_RK3566_TB3_RV
+	} else if(memcmp(text, "pwm1=", 5) == 0) {
+		i = 5;
+		if(memcmp(text + i, "on", 2) == 0) {
+			hw_conf->pwm1 = 1;
+			i = i + 2;
+		} else if(memcmp(text + i, "off", 3) == 0) {
+			hw_conf->pwm1 = -1;
+			i = i + 3;
+		} else
+			goto invalid_line;
+	} else if(memcmp(text, "pwm5=", 5) == 0) {
+		i = 5;
+		if(memcmp(text + i, "on", 2) == 0) {
+			hw_conf->pwm5 = 1;
+			i = i + 2;
+		} else if(memcmp(text + i, "off", 3) == 0) {
+			hw_conf->pwm5 = -1;
+			i = i + 3;
+		} else
+			goto invalid_line;
+#endif
 	} else
 		goto invalid_line;
 
@@ -1255,5 +1277,17 @@ void handle_hw_conf(cmd_tbl_t *cmdtp, struct fdt_header *working_fdt, struct hw_
 		set_hw_property(working_fdt, "/dsi@fe060000", "status", "disabled", 9);
 		set_hw_property(working_fdt, "/dsi@fe060000/ports/port@0/endpoint@1", "status", "disabled", 9);
 	}
+#endif
+
+#ifdef CONFIG_RK3566_TB3_RV
+	if (hw_conf->pwm1 == 1)
+		set_hw_property(working_fdt, "/pwm@fdd70010", "status", "okay", 5);
+	else if (hw_conf->pwm1 == -1)
+		set_hw_property(working_fdt, "/pwm@fdd70010", "status", "disabled", 9);
+
+	if (hw_conf->pwm5 == 1)
+		set_hw_property(working_fdt, "/pwm@fe6e0010", "status", "okay", 5);
+	else if (hw_conf->pwm5 == -1)
+		set_hw_property(working_fdt, "/pwm@fe6e0010", "status", "disabled", 9);
 #endif
 }
