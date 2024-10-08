@@ -879,17 +879,17 @@ void parse_hw_config(struct hw_config *hw_conf)
 
 	if (do_ext2load(NULL, 0, 5, fs_argv)) {
 		printf("[conf] do_ext2load fail from /data/overlay-boot/upper/config.txt\n");
-		if (!strcmp(devnum, "0"))
+		if (!strcmp(tdevnum, "0"))
 			fs_argv[2] = "0:7";
-		else if (!strcmp(devnum, "1"))
-		fs_argv[2] = "1:7";
+		else if (!strcmp(tdevnum, "1"))
+			fs_argv[2] = "1:7";
 		else {
 			printf("Invalid devnum\n");
 			goto end;
 		}
 
-		fs_argv[3] = file_addr;
 		fs_argv[4] = "config.txt";
+
 		if (do_ext2load(NULL, 0, 5, fs_argv)) {
 			printf("[conf] do_ext2load fail from /boot/config.txt\n");
 			goto end;
