@@ -1263,7 +1263,6 @@ static int load_bmp_logo_legacy(struct logo_info *logo, const char *bmp_name)
 	int ret = 0;
 	int reserved = 0;
 	int dst_size;
-	bool show_bmp_from_splash = true;
 
 	if (!logo || !bmp_name)
 		return -EINVAL;
@@ -1280,12 +1279,7 @@ static int load_bmp_logo_legacy(struct logo_info *logo, const char *bmp_name)
 	if (!header)
 		return -ENOMEM;
 
-	len =  read_bmp_header(header);
-	if (len == 0) {
-		show_bmp_from_splash = false;
-		len = rockchip_read_resource_file(header, bmp_name, 0, RK_BLK_SIZE);
-	}
-
+	len = rockchip_read_resource_file(header, bmp_name, 0, RK_BLK_SIZE);
 	if (len != RK_BLK_SIZE) {
 		ret = -EINVAL;
 		goto free_header;
@@ -1296,8 +1290,6 @@ static int load_bmp_logo_legacy(struct logo_info *logo, const char *bmp_name)
 	logo->height = get_unaligned_le32(&header->height);
 	dst_size = logo->width * logo->height * logo->bpp >> 3;
 	reserved = get_unaligned_le32(&header->reserved);
-
-	printf("load_bmp_logo  %x %x bit_count=%x width=%x height=%x file_size=%x\n", header->signature[0], header->signature[1],header->bit_count, header->width, header->height, header->file_size);
 	if (logo->height < 0)
 	    logo->height = -logo->height;
 	size = get_unaligned_le32(&header->file_size);
@@ -1314,10 +1306,7 @@ static int load_bmp_logo_legacy(struct logo_info *logo, const char *bmp_name)
 		dst = pdst;
 	}
 
-	if (show_bmp_from_splash)
-		len = read_bmp_from_splash(pdst, 0, size);
-	else
-		len = rockchip_read_resource_file(pdst, bmp_name, 0, size);
+	len = rockchip_read_resource_file(pdst, bmp_name, 0, size);
 	if (len != size) {
 		printf("failed to load bmp %s\n", bmp_name);
 		ret = -ENOENT;
@@ -1498,6 +1487,7 @@ static int load_bmp_logo(struct logo_info *logo, const char *bmp_name)
 	void *dst_rotate = NULL;
 	int len, dst_size;
 	int ret = 0;
+	struct bmp_header *header;
 
 	if (!logo || !bmp_name)
 		return -EINVAL;
@@ -1511,13 +1501,24 @@ static int load_bmp_logo(struct logo_info *logo, const char *bmp_name)
 		return 0;
 	}
 
+	header = malloc(RK_BLK_SIZE);
+	if (!header)
+		return -ENOMEM;
+
 	bmp_data = malloc(MAX_IMAGE_BYTES);
 	if (!bmp_data)
 		return -ENOMEM;
 
 	bmp_create(&bmp, &bitmap_callbacks);
 
-	len = rockchip_read_resource_file(bmp_data, bmp_name, 0, MAX_IMAGE_BYTES);
+	len = read_bmp_header(header);
+	if (len == 0) {
+		len = rockchip_read_resource_file(bmp_data, bmp_name, 0, MAX_IMAGE_BYTES);
+	}
+	else {
+		len = read_bmp_from_splash(bmp_data, 0, MAX_IMAGE_BYTES);
+	}
+
 	if (len < 0) {
 		ret = -EINVAL;
 		goto free_bmp_data;
