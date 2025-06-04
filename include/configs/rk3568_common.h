@@ -85,10 +85,13 @@
 #define ENV_MEM_LAYOUT_SETTINGS \
 	"scriptaddr=0x00c00000\0" \
 	"pxefile_addr_r=0x00e00000\0" \
+	"temp_file_addr=0x08000000\0" \
 	"fdt_addr_r=0x08300000\0" \
 	"kernel_addr_r=0x00280000\0" \
 	"kernel_addr_c=0x04080000\0" \
 	"ramdisk_addr_r=0x0a200000\0"
+
+#define CONFIG_ENV_OVERWRITE	1
 
 #include <config_distro_bootcmd.h>
 

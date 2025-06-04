@@ -18,6 +18,7 @@
 #include <mapmem.h>
 #include <asm/io.h>
 #include <sysmem.h>
+#include "interface_overlay.h"
 
 #ifndef CONFIG_SYS_FDT_PAD
 #define CONFIG_SYS_FDT_PAD 0x3000
@@ -246,6 +247,65 @@ int boot_relocate_fdt(struct lmb *lmb, char **of_flat_tree, ulong *of_size)
 	int	err;
 	int	disable_relocation = 0;
 
+	parse_cmdline();
+	struct fdt_header *working_fdt;
+	struct hw_config hw_conf;
+	memset(&hw_conf, 0, sizeof(struct hw_config));
+	parse_hw_config(&hw_conf);
+
+	printf("config.txt valid = %d\n", hw_conf.valid);
+	if(hw_conf.valid == 1) {
+		printf("config on: 1, config off: -1, no config: 0\n");
+#ifdef CONFIG_RK3568_TB3N
+		printf("intf.uart4 = %d\n", hw_conf.uart4);
+		printf("intf.i2c5 = %d\n", hw_conf.i2c5);
+		printf("intf.uart9 = %d\n", hw_conf.uart9);
+		printf("intf.pwm12 = %d\n", hw_conf.pwm12);
+		printf("intf.pwm13 = %d\n", hw_conf.pwm13);
+		printf("intf.pwm14 = %d\n", hw_conf.pwm14);
+		printf("intf.pwm15 = %d\n", hw_conf.pwm15);
+		printf("intf.spdif_8ch = %d\n", hw_conf.spdif_8ch);
+		printf("intf.spi3 = %d\n", hw_conf.spi3);
+		printf("intf.i2s3_2ch = %d\n", hw_conf.i2s3_2ch);
+		printf("conf.COM1 = %d\n", hw_conf.com1);
+		printf("conf.COM2 = %d\n", hw_conf.com2);
+#endif
+#ifdef CONFIG_RK3566_TB3
+		printf("intf.uart0 = %d\n", hw_conf.uart0);
+		printf("intf.uart1 = %d\n", hw_conf.uart1);
+		printf("intf.uart4 = %d\n", hw_conf.uart4);
+		printf("intf.uart9 = %d\n", hw_conf.uart9);
+		printf("intf.i2c1 = %d\n", hw_conf.i2c1);
+		printf("intf.i2c5 = %d\n", hw_conf.i2c5);
+		printf("intf.i2s3_2ch = %d\n", hw_conf.i2s3_2ch);
+		printf("intf.spi2 = %d\n", hw_conf.spi2);
+		printf("intf.spi3 = %d\n", hw_conf.spi3);
+		printf("intf.spdif_8ch = %d\n", hw_conf.spdif_8ch);
+		printf("intf.pwm0 = %d\n", hw_conf.pwm0);
+		printf("intf.pwm1 = %d\n", hw_conf.pwm1);
+		printf("intf.pwm2 = %d\n", hw_conf.pwm2);
+		printf("intf.pwm5 = %d\n", hw_conf.pwm5);
+		printf("intf.pwm7 = %d\n", hw_conf.pwm7);
+		printf("intf.pwm8 = %d\n", hw_conf.pwm8);
+		printf("intf.pwm9 = %d\n", hw_conf.pwm9);
+		printf("intf.pwm12 = %d\n", hw_conf.pwm12);
+		printf("intf.pwm13 = %d\n", hw_conf.pwm13);
+		printf("intf.pwm14 = %d\n", hw_conf.pwm14);
+		printf("intf.pwm15 = %d\n", hw_conf.pwm15);
+		printf("intf.xin32k = %d\n", hw_conf.xin32k);
+		printf("conf.hdmi = %d\n", hw_conf.hdmi);
+		printf("conf.dsi0 = %d\n", hw_conf.dsi0);
+#endif
+#ifdef CONFIG_RK3566_TB3_RV
+		printf("intf.pwm1 = %d\n", hw_conf.pwm1);
+		printf("intf.pwm5 = %d\n", hw_conf.pwm5);
+#endif
+		printf("conf.auto_ums = %d\n", hw_conf.auto_ums);
+
+		for (int i = 0; i < hw_conf.overlay_count; i++)
+			printf("get overlay name: %s\n", hw_conf.overlay_file[i]);
+	}
+
 	/* nothing to do */
 	if (*of_size == 0)
 		return 0;
@@ -326,6 +386,17 @@ int boot_relocate_fdt(struct lmb *lmb, char **of_flat_tree, ulong *of_size)
 #ifdef CONFIG_CMD_FDT
 	set_working_fdt_addr((ulong)*of_flat_tree);
 #endif
+
+	working_fdt = resize_working_fdt();
+	if(working_fdt != NULL) {
+		if(hw_conf.valid)
+			handle_hw_conf(NULL, working_fdt, &hw_conf);
+
+#ifdef CONFIG_RK3568_TB3N
+		set_lan_status(working_fdt);
+#endif
+	}
+
 	return 0;
 
 error:
