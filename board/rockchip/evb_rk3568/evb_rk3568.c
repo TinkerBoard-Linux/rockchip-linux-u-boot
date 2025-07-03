@@ -11,6 +11,7 @@
 #include <asm/io.h>
 #include <asm/arch-rockchip/cpu.h>
 #include <rockusb.h>
+#include <environment.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -32,6 +33,19 @@ static struct dwc3_device dwc3_device_data = {
 int usb_gadget_handle_interrupts(int index)
 {
 	dwc3_uboot_handle_interrupt(0);
+	return 0;
+}
+
+int rk_board_late_init(void)
+{
+	const char *oldargs = env_get("bootargs");
+
+	if (oldargs && !strstr(oldargs, "net.ifnames=0")) {
+		char newargs[1024];
+		snprintf(newargs, sizeof(newargs), "%s net.ifnames=0 biosdevname=0", oldargs);
+		env_set("bootargs", newargs);
+	}
+
 	return 0;
 }
 
